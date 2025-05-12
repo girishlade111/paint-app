@@ -1,0 +1,452 @@
+import { useState, useRef, useEffect } from 'react'
+import { 
+  Pencil, 
+  Paintbrush, 
+  Eraser, 
+  Square, 
+  Circle, 
+  Type, 
+  Minus, 
+  Save, 
+  RotateCcw, 
+  RotateCw, 
+  Trash2,
+  Maximize,
+  Minimize
+} from 'lucide-react'
+import { Button } from "/components/ui/button"
+import { Slider } from "/components/ui/slider"
+import { Card, CardContent, CardHeader, CardTitle } from "/components/ui/card"
+
+type Tool = 'pencil' | 'brush' | 'eraser' | 'rectangle' | 'circle' | 'text' | 'line'
+type Point = { x: number; y: number }
+
+export default function PaintApp() {
+  const canvasRef = useRef<HTMLCanvasElement>(null)
+  const [isDrawing, setIsDrawing] = useState(false)
+  const [currentTool, setCurrentTool] = useState<Tool>('pencil')
+  const [color, setColor] = useState('#000000')
+  const [size, setSize] = useState(5)
+  const [history, setHistory] = useState<string[]>([])
+  const [historyIndex, setHistoryIndex] = useState(-1)
+  const [startPoint, setStartPoint] = useState<Point | null>(null)
+  const [textInput, setTextInput] = useState('')
+  const [showTextInput, setShowTextInput] = useState(false)
+  const [textPosition, setTextPosition] = useState<Point | null>(null)
+  const [isFullscreen, setIsFullscreen] = useState(false)
+  const [tempCanvas, setTempCanvas] = useState<HTMLCanvasElement | null>(null)
+
+  // Initialize canvas and context
+  useEffect(() => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+
+    // Create a temporary canvas for shape previews
+    const tempCanvas = document.createElement('canvas')
+    tempCanvas.width = canvas.width
+    tempCanvas.height = canvas.height
+    setTempCanvas(tempCanvas)
+
+    const resizeCanvas = () => {
+      const parent = canvas.parentElement
+      if (!parent) return
+
+      // Subtract toolbar height (approx 200px) from window height
+      const canvasHeight = window.innerHeight - 200
+      canvas.width = parent.clientWidth
+      canvas.height = canvasHeight
+      if (tempCanvas) {
+        tempCanvas.width = canvas.width
+        tempCanvas.height = canvas.height
+      }
+
+      const ctx = canvas.getContext('2d')
+      if (!ctx) return
+
+      // Fill with white background
+      ctx.fillStyle = '#ffffff'
+      ctx.fillRect(0, 0, canvas.width, canvas.height)
+      saveCanvasState()
+    }
+
+    resizeCanvas()
+    window.addEventListener('resize', resizeCanvas)
+
+    return () => {
+      window.removeEventListener('resize', resizeCanvas)
+    }
+  }, [isFullscreen])
+
+  const toggleFullscreen = () => {
+    setIsFullscreen(!isFullscreen)
+  }
+
+  const saveCanvasState = () => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+
+    // Save only the most recent 20 states for undo/redo
+    const newHistory = [...history.slice(0, historyIndex + 1), canvas.toDataURL()]
+    setHistory(newHistory)
+    setHistoryIndex(newHistory.length - 1)
+  }
+
+  const undo = () => {
+    if (historyIndex <= 0) return
+
+    const newIndex = historyIndex - 1
+    setHistoryIndex(newIndex)
+    loadCanvasState(history[newIndex])
+  }
+
+  const redo = () => {
+    if (historyIndex >= history.length - 1) return
+
+    const newIndex = historyIndex + 1
+    setHistoryIndex(newIndex)
+    loadCanvasState(history[newIndex])
+  }
+
+  const loadCanvasState = (dataUrl: string) => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+
+    const image = new window.Image()
+    image.onload = () => {
+      ctx.clearRect(0, 0, canvas.width, canvas.height)
+      ctx.drawImage(image, 0, 0)
+    }
+    image.src = dataUrl
+  }
+
+  const clearCanvas = () => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+
+    ctx.fillStyle = '#ffffff'
+    ctx.fillRect(0, 0, canvas.width, canvas.height)
+    saveCanvasState()
+  }
+
+  const startDrawing = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+
+    const rect = canvas.getBoundingClientRect()
+    const x = e.clientX - rect.left
+    const y = e.clientY - rect.top
+
+    if (currentTool === 'text') {
+      setTextPosition({ x, y })
+      setShowTextInput(true)
+      return
+    }
+
+    setIsDrawing(true)
+    setStartPoint({ x, y })
+
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+
+    if (currentTool === 'pencil' || currentTool === 'brush' || currentTool === 'eraser') {
+      ctx.beginPath()
+      ctx.moveTo(x, y)
+      ctx.strokeStyle = color
+      ctx.lineWidth = size
+      ctx.lineCap = 'round'
+      ctx.lineJoin = 'round'
+
+      if (currentTool === 'eraser') {
+        ctx.globalCompositeOperation = 'destination-out'
+      } else {
+        ctx.globalCompositeOperation = 'source-over'
+      }
+    }
+  }
+
+  const draw = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (!isDrawing || !startPoint) return
+
+    const canvas = canvasRef.current
+    if (!canvas) return
+
+    const rect = canvas.getBoundingClientRect()
+    const x = e.clientX - rect.left
+    const y = e.clientY - rect.top
+
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+
+    if (currentTool === 'pencil' || currentTool === 'brush' || currentTool === 'eraser') {
+      ctx.lineTo(x, y)
+      ctx.stroke()
+    } else if (currentTool === 'rectangle' || currentTool === 'circle' || currentTool === 'line') {
+      // Clear the temporary canvas
+      if (tempCanvas) {
+        const tempCtx = tempCanvas.getContext('2d')
+        if (tempCtx) {
+          tempCtx.clearRect(0, 0, tempCanvas.width, tempCanvas.height)
+          
+          // Draw the current state from history
+          if (historyIndex >= 0) {
+            const image = new window.Image()
+            image.onload = () => {
+              tempCtx.drawImage(image, 0, 0)
+              
+              // Draw the current shape preview
+              tempCtx.beginPath()
+              tempCtx.strokeStyle = color
+              tempCtx.lineWidth = size
+              
+              if (currentTool === 'rectangle') {
+                tempCtx.rect(startPoint.x, startPoint.y, x - startPoint.x, y - startPoint.y)
+              } else if (currentTool === 'circle') {
+                const radius = Math.sqrt(Math.pow(x - startPoint.x, 2) + Math.pow(y - startPoint.y, 2))
+                tempCtx.arc(startPoint.x, startPoint.y, radius, 0, Math.PI * 2)
+              } else if (currentTool === 'line') {
+                tempCtx.moveTo(startPoint.x, startPoint.y)
+                tempCtx.lineTo(x, y)
+              }
+              
+              tempCtx.stroke()
+              
+              // Draw the temporary canvas onto the main canvas
+              ctx.clearRect(0, 0, canvas.width, canvas.height)
+              ctx.drawImage(tempCanvas, 0, 0)
+            }
+            image.src = history[historyIndex]
+          }
+        }
+      }
+    }
+  }
+
+  const stopDrawing = () => {
+    if (!isDrawing) return
+
+    const canvas = canvasRef.current
+    if (!canvas) return
+
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+
+    // For shapes, we need to commit them to the canvas
+    if (currentTool === 'rectangle' || currentTool === 'circle' || currentTool === 'line') {
+      // Clear the temporary canvas
+      if (tempCanvas) {
+        const tempCtx = tempCanvas.getContext('2d')
+        if (tempCtx) {
+          tempCtx.clearRect(0, 0, tempCanvas.width, tempCanvas.height)
+        }
+      }
+    }
+
+    setIsDrawing(false)
+    setStartPoint(null)
+    saveCanvasState()
+  }
+
+  const addText = () => {
+    if (!textPosition || !textInput.trim()) {
+      setShowTextInput(false)
+      return
+    }
+
+    const canvas = canvasRef.current
+    if (!canvas) return
+
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+
+    ctx.font = `${size}px Arial`
+    ctx.fillStyle = color
+    ctx.fillText(textInput, textPosition.x, textPosition.y)
+    
+    setShowTextInput(false)
+    setTextInput('')
+    saveCanvasState()
+  }
+
+  const saveCanvas = () => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+
+    const link = document.createElement('a')
+    link.download = 'drawing.png'
+    link.href = canvas.toDataURL('image/png')
+    link.click()
+  }
+
+  const colors = [
+    '#000000', '#ffffff', '#ff0000', '#00ff00', '#0000ff', 
+    '#ffff00', '#00ffff', '#ff00ff', '#c0c0c0', '#808080'
+  ]
+
+  return (
+    <div className={`min-h-screen bg-gray-100 ${isFullscreen ? 'fixed inset-0 z-50 bg-white' : 'p-4'}`}>
+      <Card className={`${isFullscreen ? 'h-screen' : 'max-w-6xl mx-auto'}`}>
+        <CardHeader className={`${isFullscreen ? 'bg-white border-b' : ''}`}>
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-2xl font-bold">Paint App</CardTitle>
+            <Button 
+              variant="outline" 
+              size="icon"
+              onClick={toggleFullscreen}
+              className="ml-2"
+            >
+              {isFullscreen ? <Minimize className="h-4 w-4" /> : <Maximize className="h-4 w-4" />}
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent className={`${isFullscreen ? 'p-0' : ''}`}>
+          {/* Toolbar */}
+          <div className={`flex flex-wrap gap-2 mb-4 ${isFullscreen ? 'p-4 border-b' : ''}`}>
+            <div className="flex gap-2">
+              <Button 
+                variant={currentTool === 'pencil' ? 'default' : 'outline'} 
+                size="icon"
+                onClick={() => setCurrentTool('pencil')}
+              >
+                <Pencil className="h-4 w-4" />
+              </Button>
+              <Button 
+                variant={currentTool === 'brush' ? 'default' : 'outline'} 
+                size="icon"
+                onClick={() => setCurrentTool('brush')}
+              >
+                <Paintbrush className="h-4 w-4" />
+              </Button>
+              <Button 
+                variant={currentTool === 'eraser' ? 'default' : 'outline'} 
+                size="icon"
+                onClick={() => setCurrentTool('eraser')}
+              >
+                <Eraser className="h-4 w-4" />
+              </Button>
+              <Button 
+                variant={currentTool === 'rectangle' ? 'default' : 'outline'} 
+                size="icon"
+                onClick={() => setCurrentTool('rectangle')}
+              >
+                <Square className="h-4 w-4" />
+              </Button>
+              <Button 
+                variant={currentTool === 'circle' ? 'default' : 'outline'} 
+                size="icon"
+                onClick={() => setCurrentTool('circle')}
+              >
+                <Circle className="h-4 w-4" />
+              </Button>
+              <Button 
+                variant={currentTool === 'line' ? 'default' : 'outline'} 
+                size="icon"
+                onClick={() => setCurrentTool('line')}
+              >
+                <Minus className="h-4 w-4" />
+              </Button>
+              <Button 
+                variant={currentTool === 'text' ? 'default' : 'outline'} 
+                size="icon"
+                onClick={() => setCurrentTool('text')}
+              >
+                <Type className="h-4 w-4" />
+              </Button>
+            </div>
+
+            <div className="flex gap-2 ml-auto">
+              <Button variant="outline" size="icon" onClick={undo} disabled={historyIndex <= 0}>
+                <RotateCcw className="h-4 w-4" />
+              </Button>
+              <Button variant="outline" size="icon" onClick={redo} disabled={historyIndex >= history.length - 1}>
+                <RotateCw className="h-4 w-4" />
+              </Button>
+              <Button variant="outline" size="icon" onClick={clearCanvas}>
+                <Trash2 className="h-4 w-4" />
+              </Button>
+              <Button variant="default" onClick={saveCanvas}>
+                <Save className="h-4 w-4 mr-2" />
+                Save
+              </Button>
+            </div>
+          </div>
+
+          {/* Color and size controls */}
+          <div className={`flex flex-wrap gap-4 mb-4 items-center ${isFullscreen ? 'px-4' : ''}`}>
+            <div className="flex gap-2 items-center">
+              <span className="text-sm font-medium">Color:</span>
+              <div className="flex gap-1">
+                {colors.map((c) => (
+                  <button
+                    key={c}
+                    className="w-6 h-6 rounded-full border border-gray-300"
+                    style={{ backgroundColor: c }}
+                    onClick={() => setColor(c)}
+                  />
+                ))}
+              </div>
+              <input
+                type="color"
+                value={color}
+                onChange={(e) => setColor(e.target.value)}
+                className="w-8 h-8 border border-gray-300 rounded cursor-pointer"
+              />
+            </div>
+
+            <div className="flex gap-2 items-center">
+              <span className="text-sm font-medium">Size:</span>
+              <Slider
+                defaultValue={[size]}
+                min={1}
+                max={50}
+                step={1}
+                className="w-32"
+                onValueChange={(value) => setSize(value[0])}
+              />
+              <span className="text-sm w-8">{size}</span>
+            </div>
+          </div>
+
+          {/* Canvas */}
+          <div className={`border border-gray-300 ${isFullscreen ? 'border-0' : 'rounded'}`}>
+            <canvas
+              ref={canvasRef}
+              className={`w-full bg-white cursor-crosshair ${isFullscreen ? 'h-[calc(100vh-200px)]' : 'h-[600px]'}`}
+              onMouseDown={startDrawing}
+              onMouseMove={draw}
+              onMouseUp={stopDrawing}
+              onMouseLeave={stopDrawing}
+            />
+          </div>
+
+          {/* Text input modal */}
+          {showTextInput && (
+            <div className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-50 z-50">
+              <div className="bg-white p-4 rounded shadow-lg">
+                <input
+                  type="text"
+                  value={textInput}
+                  onChange={(e) => setTextInput(e.target.value)}
+                  placeholder="Enter text"
+                  className="border border-gray-300 p-2 rounded w-full mb-2"
+                  autoFocus
+                />
+                <div className="flex justify-end gap-2">
+                  <Button variant="outline" onClick={() => setShowTextInput(false)}>
+                    Cancel
+                  </Button>
+                  <Button onClick={addText}>Add Text</Button>
+                </div>
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  )
+}
